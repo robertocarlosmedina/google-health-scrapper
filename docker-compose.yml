@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-google_health}
+      POSTGRES_USER: ${POSTGRES_USER:-health}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-health}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  scraper:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./token.json:/app/token.json
+    profiles: ["scraper"]
+
+volumes:
+  pgdata:

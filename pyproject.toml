@@ -1,0 +1,23 @@
+[project]
+name = "google-health-scrapper"
+version = "0.1.0"
+description = "Cron-style scraper that pulls Fitbit / Google Health API data and stores it in PostgreSQL."
+requires-python = ">=3.11"
+dependencies = [
+    "colorlog",
+    "psycopg[binary]>=3.2",
+    "requests>=2.32",
+    "python-dotenv>=1.1",
+    "APScheduler>=3.10,<4",
+    "google-auth-oauthlib>=1.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3.14",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
