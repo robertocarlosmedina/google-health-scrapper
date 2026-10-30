@@ -8,6 +8,7 @@ setupLogging()
 
 from scraper import globals as g
 from scraper.adapters.postgres_data_point_adapter import PostgresDataPointRepositoryAdapter
+from scraper.adapters.postgres_typed_adapter import PostgresTypedRepositoryAdapter
 from scraper.adapters.postgres_sync_state_adapter import PostgresSyncStateRepositoryAdapter
 from scraper.clients.google_auth import AuthError, run_consent_flow
 from scraper.clients.google_health_client import GoogleHealthClient
@@ -24,6 +25,7 @@ def build_service() -> SyncService:
         client=GoogleHealthClient(),
         data_point_repository=PostgresDataPointRepositoryAdapter(conn),
         sync_state_repository=PostgresSyncStateRepositoryAdapter(conn),
+        typed_repository=PostgresTypedRepositoryAdapter(conn),
         data_types=resolve_data_types(g.SYNC_DATA_TYPES),
         initial_lookback_days=g.SYNC_INITIAL_LOOKBACK_DAYS,
         overlap_hours=g.SYNC_OVERLAP_HOURS,
@@ -73,6 +75,12 @@ def cmd_run(_args) -> int:
     return 0
 
 
+def cmd_rebuild(_args) -> int:
+    """Re-derive the typed tables from the stored raw JSON (no Google API calls)."""
+    build_service().rebuild_typed()
+    return 0
+
+
 def cmd_probe(args) -> int:
     """Print one raw page of a data type, to inspect the API's real response shape."""
     client = GoogleHealthClient()
@@ -89,6 +97,7 @@ def main() -> int:
     sub.add_parser("auth", help="one-time Google login, stores the refresh token").set_defaults(func=cmd_auth)
     sub.add_parser("sync", help="run a single sync and exit (for system cron)").set_defaults(func=cmd_sync)
     sub.add_parser("run", help="run forever, syncing on SYNC_INTERVAL_MINUTES").set_defaults(func=cmd_run)
+    sub.add_parser("rebuild-typed", help="rebuild typed tables from stored raw JSON").set_defaults(func=cmd_rebuild)
     probe = sub.add_parser("probe", help="print raw data points for one data type")
     probe.add_argument("data_type")
     probe.add_argument("--limit", type=int, default=3)

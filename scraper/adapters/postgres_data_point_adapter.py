@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import Iterator, List
 
 from scraper.mappers.data_point_mapper import DataPointMapper
 from scraper.models.health_models import DataPoint
@@ -42,3 +42,18 @@ class PostgresDataPointRepositoryAdapter(DataPointRepository):
             "SELECT max(start_time) AS t FROM health_data_points WHERE data_type = %s", (data_type,)
         ).fetchone()
         return row["t"]
+
+    def iter_points(self, data_type: str, batch_size: int = 5000) -> Iterator[DataPoint]:
+        last_id = ""
+        while True:
+            rows = self.conn.execute(
+                "SELECT data_type, point_id, start_time, end_time, record_date, payload FROM health_data_points "
+                "WHERE data_type = %s AND point_id > %s ORDER BY point_id LIMIT %s",
+                (data_type, last_id, batch_size),
+            ).fetchall()
+            if not rows:
+                return
+            for r in rows:
+                yield DataPoint(dataType=r["data_type"], pointId=r["point_id"], payload=r["payload"],
+                                startTime=r["start_time"], endTime=r["end_time"], recordDate=r["record_date"])
+            last_id = rows[-1]["point_id"]

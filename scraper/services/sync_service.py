@@ -1,17 +1,21 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from scraper.clients.google_health_client import GoogleHealthClient
+from scraper.clients.google_health_client import GoogleHealthApiError, GoogleHealthClient
 from scraper.mappers.data_point_mapper import DataPointMapper
+from scraper.mappers.typed_mapper import TypedMapper
 from scraper.models.data_types import (
-    DAILY, DATA_TYPE_KINDS, DEFAULT_DATA_TYPES, INTERVAL, SAMPLE, SESSION, SLEEP)
+    DAILY, DATA_TYPE_KINDS, DEFAULT_DATA_TYPES, INTERVAL, RECONCILE_TYPES, ROLLUP, SAMPLE, SESSION, SLEEP)
 from scraper.repositories.data_point_repository import DataPointRepository
+from scraper.repositories.typed_repository import TypedRepository
 from scraper.repositories.sync_state_repository import SyncStateRepository
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 2000
 MAX_PAGE_SIZE = 10000  # API maximum; sleep and exercise are capped at 25 (their default)
+ROLLUP_WINDOW = "60s"  # one bucket per minute, like the Takeout `calories` series
+USER_RESOURCES = ("identity", "profile", "settings")  # whole-account resources, stored as-is
 
 
 def resolve_data_types(configured: str) -> list[str]:
@@ -71,10 +75,12 @@ class SyncService:
         initial_lookback_days: int,
         overlap_hours: int,
         window_days: int,
+        typed_repository: TypedRepository | None = None,
     ):
         self.client = client
         self.points_repo = data_point_repository
         self.state_repo = sync_state_repository
+        self.typed_repo = typed_repository
         self.data_types = data_types
         self.initial_lookback = timedelta(days=initial_lookback_days)
         self.overlap = timedelta(hours=overlap_hours)
@@ -91,6 +97,7 @@ class SyncService:
                 failures += 1
                 logger.error("Sync failed for %s: %s", data_type, e, exc_info=logger.isEnabledFor(logging.DEBUG))
                 self.state_repo.mark_failure(data_type, str(e))
+        self.sync_user_resources()
         logger.info(
             "Sync finished: %d points across %d types, %d failed",
             sum(results.values()), len(results), failures,
@@ -122,14 +129,68 @@ class SyncService:
     def _page_size(data_type: str) -> int | None:
         return None if DATA_TYPE_KINDS[data_type] in (SESSION, SLEEP) else MAX_PAGE_SIZE
 
+    def _fetch(self, data_type: str, start: datetime, end: datetime):
+        if DATA_TYPE_KINDS[data_type] == ROLLUP:
+            return self.client.roll_up(data_type, _rfc3339(start), _rfc3339(end), ROLLUP_WINDOW)
+        return self.client.list_data_points(
+            data_type, build_filter(data_type, start, end), page_size=self._page_size(data_type),
+            reconcile=data_type in RECONCILE_TYPES,
+        )
+
+    def _store(self, data_type: str, points: list) -> int:
+        """Upsert raw points, then the typed rows derived from them."""
+        written = self.points_repo.upsert_many(points)
+        self._store_typed(data_type, points)
+        return written
+
+    def _store_typed(self, data_type: str, points: list) -> None:
+        if not self.typed_repo:
+            return
+        tables: dict[str, list[dict]] = {}
+        for point in points:
+            for table, rows in TypedMapper.rows_for(data_type, point.payload).items():
+                tables.setdefault(table, []).extend(rows)
+        for table, rows in tables.items():
+            self.typed_repo.upsert_rows(table, rows)
+
     def _sync_window(self, data_type: str, start: datetime, end: datetime) -> int:
-        filter_expr = build_filter(data_type, start, end)
         batch, written = [], 0
-        for raw in self.client.list_data_points(data_type, filter_expr, page_size=self._page_size(data_type)):
+        for raw in self._fetch(data_type, start, end):
             batch.append(DataPointMapper.from_api(data_type, raw))
             if len(batch) >= BATCH_SIZE:
-                written += self.points_repo.upsert_many(batch)
+                written += self._store(data_type, batch)
                 batch = []
-        written += self.points_repo.upsert_many(batch)
+        written += self._store(data_type, batch)
         logger.debug("%s [%s, %s): %d points", data_type, _rfc3339(start), _rfc3339(end), written)
         return written
+
+    def sync_user_resources(self) -> None:
+        """Identity / profile / settings: small, unversioned, so just overwrite the latest copy."""
+        if not self.typed_repo:
+            return
+        for resource in USER_RESOURCES:
+            try:
+                payload = self.client.get_resource(resource)
+            except GoogleHealthApiError as e:
+                logger.warning("Skipping user resource %s: %s", resource, e)
+                continue
+            self.typed_repo.upsert_rows("user_resources", [{"resource": resource, "payload": payload}])
+
+    def rebuild_typed(self) -> dict[str, int]:
+        """Re-derive the typed tables from stored raw JSON (no API calls); use after changing a mapper."""
+        counts: dict[str, int] = {}
+        for data_type in self.data_types:
+            batch, n = [], 0
+            for point in self.points_repo.iter_points(data_type):
+                batch.append(point)
+                if len(batch) >= BATCH_SIZE:
+                    n += self._rebuild_batch(data_type, batch)
+                    batch = []
+            n += self._rebuild_batch(data_type, batch)
+            counts[data_type] = n
+            logger.info("Rebuilt typed rows for %s from %d raw points", data_type, n)
+        return counts
+
+    def _rebuild_batch(self, data_type: str, points: list) -> int:
+        self._store_typed(data_type, points)
+        return len(points)

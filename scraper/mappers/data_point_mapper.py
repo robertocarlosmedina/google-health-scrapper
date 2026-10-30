@@ -41,6 +41,9 @@ class DataPointMapper:
     def from_api(data_type: str, raw: dict) -> DataPoint:
         start = end = record_date = None
 
+        # Rollup buckets (e.g. total-calories) carry their window at the top level.
+        start, end = _parse_dt(raw.get("startTime")), _parse_dt(raw.get("endTime"))
+
         for value in raw.values():
             if not isinstance(value, dict):
                 continue

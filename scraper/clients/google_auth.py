@@ -15,6 +15,12 @@ SCOPES = [
     _SCOPE_PREFIX + "activity_and_fitness.readonly",
     _SCOPE_PREFIX + "health_metrics_and_measurements.readonly",
     _SCOPE_PREFIX + "sleep.readonly",
+    _SCOPE_PREFIX + "ecg.readonly",
+    _SCOPE_PREFIX + "irn.readonly",
+    _SCOPE_PREFIX + "nutrition.readonly",
+    _SCOPE_PREFIX + "location.readonly",
+    _SCOPE_PREFIX + "profile.readonly",
+    _SCOPE_PREFIX + "settings.readonly",
 ]
 
 
