@@ -50,6 +50,9 @@ DATA_TYPE_KINDS: dict[str, str] = {
     "weight": SAMPLE,
 }
 
+# ECG queries only accept `interval.start_time >= ...` (no upper bound, no civil time).
+LOWER_BOUND_ONLY_TYPES = {"electrocardiogram"}
+
 # Types whose `list` is unsupported but that can be read with `dataPoints:reconcile`.
 RECONCILE_TYPES = {"floors"}
 

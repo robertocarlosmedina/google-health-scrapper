@@ -14,6 +14,8 @@ def test_filters_per_kind():
     assert "heart_rate.sample_time.physical_time" in build_filter("heart-rate", T0, T1)
     assert 'daily_resting_heart_rate.date >= "2026-10-01"' in build_filter("daily-resting-heart-rate", T0, T1)
     assert "sleep.interval.end_time" in build_filter("sleep", T0, T1)
+    ecg = build_filter("electrocardiogram", T0, T1)
+    assert ecg.startswith("electrocardiogram.interval.start_time >= ") and "<" not in ecg
 
 
 def test_resolve_types():

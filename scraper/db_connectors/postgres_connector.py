@@ -7,6 +7,7 @@ from psycopg.rows import dict_row
 from scraper.models.typed_tables import schema_sql
 
 SCHEMA_FILE = Path(__file__).parent / "sql" / "schema.sql"
+VIEWS_FILE = Path(__file__).parent / "sql" / "views.sql"
 
 
 def postgres_connector(db_name, host, port, user, password) -> psycopg.Connection:
@@ -34,4 +35,5 @@ def ensure_schema(conn: psycopg.Connection) -> None:
     """Create tables if missing (idempotent)."""
     conn.execute(SCHEMA_FILE.read_text())
     conn.execute(schema_sql())  # typed tables are generated from scraper/models/typed_tables.py
+    conn.execute(VIEWS_FILE.read_text())  # dashboard views sit on top of the typed tables
     logging.info("Database schema is up to date")

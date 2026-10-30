@@ -5,7 +5,8 @@ from scraper.clients.google_health_client import GoogleHealthApiError, GoogleHea
 from scraper.mappers.data_point_mapper import DataPointMapper
 from scraper.mappers.typed_mapper import TypedMapper
 from scraper.models.data_types import (
-    DAILY, DATA_TYPE_KINDS, DEFAULT_DATA_TYPES, INTERVAL, RECONCILE_TYPES, ROLLUP, SAMPLE, SESSION, SLEEP)
+    DAILY, DATA_TYPE_KINDS, DEFAULT_DATA_TYPES, INTERVAL, LOWER_BOUND_ONLY_TYPES, RECONCILE_TYPES, ROLLUP, SAMPLE,
+    SESSION, SLEEP)
 from scraper.repositories.data_point_repository import DataPointRepository
 from scraper.repositories.typed_repository import TypedRepository
 from scraper.repositories.sync_state_repository import SyncStateRepository
@@ -49,6 +50,8 @@ def build_filter(data_type: str, start: datetime, end: datetime) -> str:
     kind = DATA_TYPE_KINDS[data_type]
     p = _snake(data_type)
 
+    if data_type in LOWER_BOUND_ONLY_TYPES:
+        return f'{p}.interval.start_time >= "{_rfc3339(start)}"'
     if kind == INTERVAL:
         field, fmt = f"{p}.interval.start_time", _rfc3339
     elif kind == SAMPLE:
@@ -116,7 +119,8 @@ class SyncService:
         total = 0
         cursor = start
         while cursor < now:
-            window_end = min(cursor + self.window, now)
+            # A filter without an upper bound already covers everything up to now: one window is enough.
+            window_end = now if data_type in LOWER_BOUND_ONLY_TYPES else min(cursor + self.window, now)
             total += self._sync_window(data_type, cursor, window_end)
             # Checkpoint after each window so a long backfill resumes where it stopped.
             self.state_repo.mark_success(data_type, window_end)
