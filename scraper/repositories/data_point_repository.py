@@ -6,8 +6,6 @@ from scraper.models.health_models import DataPoint
 
 
 class DataPointRepository(ABC):
-    """Abstract repository interface for DataPoint persistence."""
-
     @abstractmethod
     def upsert_many(self, data_points: List[DataPoint]) -> int:
         """Insert or update data points by (dataType, pointId); return rows written."""
